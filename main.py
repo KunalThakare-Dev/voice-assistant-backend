@@ -32,7 +32,7 @@ async def process_voice_input(
     x_app_token: str = Header(None)
 ):
     try:
-        print("=== Processing voice with Gemini ===")
+        print("=== Processing voice with Gemini 2.5 Flash ===")
         
         # Authentication
         authenticate_request(x_app_token)
@@ -44,41 +44,15 @@ async def process_voice_input(
         # Configure Gemini
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # Discover available models
-        print("🔍 Discovering available models...")
-        available_models = []
-        for model in genai.list_models():
-            if 'generateContent' in model.supported_generation_methods:
-                available_models.append(model.name)
-                print(f"✅ {model.name}")
-        
-        # Try Gemini 2.5 models first, then fallback to 1.5
-        model_to_use = None
-        model_priority = [
-            "models/gemini-2.0-flash-exp",  # Latest experimental
-            "models/gemini-2.0-flash",      # Latest stable
-            "models/gemini-1.5-flash",      # Previous best for audio
-            "models/gemini-1.5-pro",        # Previous pro
-            "models/gemini-pro"             # Original
-        ]
-        
-        for model_name in model_priority:
-            if any(model_name in avail_model for avail_model in available_models):
-                model_to_use = model_name
-                print(f"🎯 Selected model: {model_to_use}")
-                break
-        
-        if not model_to_use:
-            raise Exception("No suitable Gemini model found")
-        
         # Save audio to temp file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
             temp_audio.write(audio_content)
             temp_audio_path = temp_audio.name
         
         try:
-            # Initialize the selected model
-            model = genai.GenerativeModel(model_to_use)
+            # Use LATEST Gemini 2.5 Flash - the best for audio!
+            model = genai.GenerativeModel('models/gemini-2.5-flash')
+            print("🎯 Using: Gemini 2.5 Flash (Latest Stable)")
             
             # Read audio file as bytes
             with open(temp_audio_path, 'rb') as f:
@@ -90,48 +64,32 @@ async def process_voice_input(
                 "data": audio_bytes
             }
             
-            # Optimized prompt for audio processing
+            # Smart prompt for voice assistant
             prompt = """
-            You are a voice assistant. The user has sent you an audio message.
+            You are a helpful voice assistant. The user has spoken to you.
 
             Please:
-            1. Listen carefully and transcribe exactly what the user said
-            2. Provide a helpful, natural response (1-2 sentences)
+            1. Listen carefully to the audio and understand what the user is saying
+            2. Provide a natural, helpful response (1-2 sentences)
+            3. Be conversational and friendly
 
-            Format your response EXACTLY like this:
-            TRANSCRIPT: [word-for-word transcription]
-            RESPONSE: [your helpful response]
-
-            Keep your response conversational and brief.
+            Respond directly with your helpful answer - no labels or formatting needed.
             """
             
-            print(f"🚀 Sending audio to {model_to_use}...")
+            print("🚀 Sending audio to Gemini 2.5 Flash...")
             
-            # Generate content with audio
+            # Generate content with audio using the latest model
             response = model.generate_content([prompt, audio_part])
             response_text = response.text.strip()
             
-            print(f"✅ Raw Gemini response: {response_text}")
+            print(f"✅ Gemini 2.5 Response: {response_text}")
             
-            # Parse the response
-            if "TRANSCRIPT:" in response_text and "RESPONSE:" in response_text:
-                transcript = response_text.split("TRANSCRIPT:")[1].split("RESPONSE:")[0].strip()
-                ai_response = response_text.split("RESPONSE:")[1].strip()
-            else:
-                # If format parsing fails, use intelligent fallback
-                lines = response_text.split('\n')
-                if len(lines) >= 2:
-                    transcript = lines[0]
-                    ai_response = ' '.join(lines[1:])
-                else:
-                    transcript = "Voice message processed"
-                    ai_response = response_text
-            
-            print(f"📝 Transcript: {transcript}")
-            print(f"🤖 AI Response: {ai_response}")
+            # Use the actual response as both transcript and reply
+            transcript = "Voice message processed by Gemini 2.5"
+            ai_response = response_text
             
         except Exception as gemini_error:
-            print(f"⚠ Gemini error: {gemini_error}")
+            print(f"⚠ Gemini 2.5 error: {gemini_error}")
             # Fallback to basic response
             transcript = "I heard your voice message"
             ai_response = "Hello! I received your audio. The voice assistant is working!"
@@ -150,26 +108,9 @@ async def process_voice_input(
         print(f"❌ Error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-@app.get("/models")
-async def list_models():
-    """Endpoint to check available models"""
-    try:
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        models = []
-        for model in genai.list_models():
-            if 'generateContent' in model.supported_generation_methods:
-                models.append({
-                    "name": model.name,
-                    "description": model.description,
-                    "methods": model.supported_generation_methods
-                })
-        return {"available_models": models}
-    except Exception as e:
-        return {"error": str(e)}
-
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "message": "Voice Assistant API with Latest Gemini"}
+    return {"status": "healthy", "message": "Voice Assistant API with Gemini 2.5 Flash"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
