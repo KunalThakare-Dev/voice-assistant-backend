@@ -98,11 +98,12 @@ async def process_voice_input(
             # Clean up temp file
             os.unlink(temp_audio_path)
         
-        return JSONResponse({
-            "transcript": transcript,
-            "replyText": ai_response,
-            "replyAudioBase64": "audio_placeholder"
-        })
+        # Your current backend code is fine - just returns replyText
+return JSONResponse({
+    "transcript": transcript,
+    "replyText": ai_response,
+    "replyAudioBase64": "not_needed"  # Browser handles TTS
+})
         
     except Exception as e:
         print(f"❌ Error: {e}")
