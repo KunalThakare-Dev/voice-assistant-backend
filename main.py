@@ -32,7 +32,7 @@ async def process_voice_input(
     x_app_token: str = Header(None)
 ):
     try:
-        print("=== Processing voice with Gemini 2.5 Flash ===")
+        print("=== Processing voice with Gemini ===")
         
         # Authentication
         authenticate_request(x_app_token)
@@ -50,9 +50,9 @@ async def process_voice_input(
             temp_audio_path = temp_audio.name
         
         try:
-            # Use LATEST Gemini 2.5 Flash - the best for audio!
+            # Use Gemini 2.5 Flash
             model = genai.GenerativeModel('models/gemini-2.5-flash')
-            print("🎯 Using: Gemini 2.5 Flash (Latest Stable)")
+            print("🎯 Using: Gemini 2.5 Flash")
             
             # Read audio file as bytes
             with open(temp_audio_path, 'rb') as f:
@@ -64,46 +64,39 @@ async def process_voice_input(
                 "data": audio_bytes
             }
             
-            # Smart prompt for voice assistant
+            # Smart prompt for conversation
             prompt = """
             You are a helpful voice assistant. The user has spoken to you.
-
-            Please:
-            1. Listen carefully to the audio and understand what the user is saying
-            2. Provide a natural, helpful response (1-2 sentences)
-            3. Be conversational and friendly
-
-            Respond directly with your helpful answer - no labels or formatting needed.
+            
+            Listen carefully and respond naturally in 1-2 sentences.
+            Be conversational and helpful.
             """
             
-            print("🚀 Sending audio to Gemini 2.5 Flash...")
+            print("🚀 Processing speech with Gemini 2.5...")
             
-            # Generate content with audio using the latest model
+            # Get AI response from audio
             response = model.generate_content([prompt, audio_part])
-            response_text = response.text.strip()
+            ai_response = response.text.strip()
             
-            print(f"✅ Gemini 2.5 Response: {response_text}")
+            print(f"✅ AI Response: {ai_response}")
             
-            # Use the actual response as both transcript and reply
-            transcript = "Voice message processed by Gemini 2.5"
-            ai_response = response_text
+            transcript = "Voice message processed"
             
         except Exception as gemini_error:
-            print(f"⚠ Gemini 2.5 error: {gemini_error}")
-            # Fallback to basic response
+            print(f"⚠ Gemini error: {gemini_error}")
+            # Fallback response
             transcript = "I heard your voice message"
-            ai_response = "Hello! I received your audio. The voice assistant is working!"
+            ai_response = "Hello! I received your audio. How can I help you today?"
         
         finally:
             # Clean up temp file
             os.unlink(temp_audio_path)
         
-        # Your current backend code is fine - just returns replyText
-return JSONResponse({
-    "transcript": transcript,
-    "replyText": ai_response,
-    "replyAudioBase64": "not_needed"  # Browser handles TTS
-})
+        return JSONResponse({
+            "transcript": transcript,
+            "replyText": ai_response,
+            "replyAudioBase64": "not_needed"  # Browser handles TTS
+        })
         
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -111,7 +104,7 @@ return JSONResponse({
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "message": "Voice Assistant API with Gemini 2.5 Flash"}
+    return {"status": "healthy", "message": "Voice Assistant API"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
