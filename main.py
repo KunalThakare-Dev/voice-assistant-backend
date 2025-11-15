@@ -60,7 +60,7 @@ def authenticate_websocket(websocket: WebSocket):
 async def process_audio_with_gemini(audio_content: bytes) -> dict:
     """Process audio with Gemini and return response"""
     try:
-        print("=== Processing voice with Gemini ===")
+        print("=== Processing voice with Gemini 2.5 Flash ===")
         
         if not GEMINI_API_KEY:
             raise Exception("GEMINI_API_KEY not configured")
@@ -74,23 +74,29 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             temp_audio_path = temp_audio.name
         
         try:
-            # Use Gemini 1.5 Flash
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            print("🎯 Using: Gemini 1.5 Flash")
+            # Use Gemini 2.5 Flash (Faster and better)
+            model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            print("🎯 Using: Gemini 2.5 Flash Experimental")
             
             # Create audio part for Gemini
             audio_part = {
                 "mime_type": "audio/webm",
-                "data": audio_content  # Use the bytes directly
+                "data": audio_content
             }
             
-            # Smart prompt for conversation
+            # Better prompt for more accurate responses
             prompt = """
-            You are a helpful voice assistant. Listen carefully to the user's audio and respond naturally in 1-2 sentences.
-            Be conversational and helpful. Respond directly to what the user said.
+            You are a helpful voice assistant. The user has spoken to you in audio format.
+            
+            Listen carefully to their actual words and respond directly to what they said.
+            Be conversational, helpful, and provide a relevant response.
+            Keep your response to 1-2 sentences maximum.
+            
+            If you genuinely cannot understand the audio, say: "I didn't quite catch that. Could you please repeat?"
+            Do NOT use generic fallback responses like "I received your audio" or "How can I help you today?"
             """
             
-            print("🚀 Processing speech with Gemini...")
+            print("🚀 Processing speech with Gemini 2.5...")
             
             # Get AI response from audio
             response = model.generate_content([prompt, audio_part])
@@ -98,7 +104,7 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             
             print(f"✅ AI Response: {ai_response}")
             
-            # Return actual response, not fallback
+            # Return actual response
             return {
                 "transcript": "Voice message processed",
                 "replyText": ai_response,
@@ -203,7 +209,7 @@ async def process_voice_input(
     x_app_token: str = Header(None)
 ):
     try:
-        print("=== Processing voice with Gemini (HTTP) ===")
+        print("=== Processing voice with Gemini 2.5 (HTTP) ===")
         
         # Authentication
         if not APP_TOKEN or x_app_token != APP_TOKEN:
@@ -231,7 +237,7 @@ async def process_voice_input(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "message": "Voice Assistant API with Binary WebSocket"}
+    return {"status": "healthy", "message": "Voice Assistant API with Gemini 2.5 Flash"}
 
 @app.get("/")
 async def root():
