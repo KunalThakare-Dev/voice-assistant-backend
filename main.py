@@ -139,11 +139,10 @@ async def websocket_voice_endpoint(websocket: WebSocket):
     
     try:
         while True:
-            # Wait for message from client
-            data = await websocket.receive()
-            
-            if data["type"] == "websocket.receive":
-                message_data = json.loads(data["text"])
+            # Use receive_text() for better error handling
+            try:
+                data = await websocket.receive_text()
+                message_data = json.loads(data)
                 message_type = message_data.get("type")
                 
                 if message_type == "audio_data":
@@ -170,17 +169,22 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                         "message": "Connection active"
                     }, websocket)
                     
-                elif message_type == "text_message":
-                    # Handle text messages if needed
-                    await manager.send_message({
-                        "type": "text_response",
-                        "message": "Text messages are not supported in voice mode"
-                    }, websocket)
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                print(f"Error processing message: {e}")
+                # Send error back to client but keep connection alive
+                await manager.send_message({
+                    "type": "error",
+                    "message": "Error processing request"
+                }, websocket)
+                continue  # Continue listening for next message
     
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        print("Client disconnected normally")
     except Exception as e:
         print(f"WebSocket error: {e}")
+    finally:
         manager.disconnect(websocket)
 
 # Keep existing HTTP endpoints for compatibility
