@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import google.generativeai as genai
 import uvicorn
+import json
 
 app = FastAPI(title="Voice Assistant API")
 
@@ -77,22 +78,16 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             model = genai.GenerativeModel('gemini-1.5-flash')
             print("🎯 Using: Gemini 1.5 Flash")
             
-            # Read audio file as bytes
-            with open(temp_audio_path, 'rb') as f:
-                audio_bytes = f.read()
-            
             # Create audio part for Gemini
             audio_part = {
                 "mime_type": "audio/webm",
-                "data": audio_bytes
+                "data": audio_content  # Use the bytes directly
             }
             
             # Smart prompt for conversation
             prompt = """
-            You are a helpful voice assistant. The user has spoken to you.
-            
-            Listen carefully and respond naturally in 1-2 sentences.
-            Be conversational and helpful.
+            You are a helpful voice assistant. Listen carefully to the user's audio and respond naturally in 1-2 sentences.
+            Be conversational and helpful. Respond directly to what the user said.
             """
             
             print("🚀 Processing speech with Gemini...")
@@ -103,30 +98,32 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             
             print(f"✅ AI Response: {ai_response}")
             
-            transcript = "Voice message processed"
+            # Return actual response, not fallback
+            return {
+                "transcript": "Voice message processed",
+                "replyText": ai_response,
+                "type": "assistant_response"
+            }
             
         except Exception as gemini_error:
             print(f"⚠ Gemini error: {gemini_error}")
-            # Fallback response
-            transcript = "I heard your voice message"
-            ai_response = "Hello! I received your audio. How can I help you today?"
+            # Only use fallback for actual Gemini errors
+            return {
+                "transcript": "Processing audio",
+                "replyText": "I'm having trouble processing your audio right now. Please try again.",
+                "type": "error"
+            }
         
         finally:
             # Clean up temp file
             if os.path.exists(temp_audio_path):
                 os.unlink(temp_audio_path)
         
-        return {
-            "transcript": transcript,
-            "replyText": ai_response,
-            "type": "assistant_response"
-        }
-        
     except Exception as e:
         print(f"❌ Error in process_audio_with_gemini: {e}")
         return {
             "transcript": "Error processing audio",
-            "replyText": "Sorry, I encountered an error processing your request.",
+            "replyText": "Sorry, I encountered an error. Please try again.",
             "type": "error"
         }
 
@@ -142,40 +139,60 @@ async def websocket_voice_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # Receive binary data directly
-                audio_content = await websocket.receive_bytes()
-                print(f"🎵 Received binary audio: {len(audio_content)} bytes")
+                # Wait for any message
+                data = await websocket.receive()
                 
-                # Send processing status immediately
-                await manager.send_message({
-                    "type": "processing",
-                    "message": "Processing your audio..."
-                }, websocket)
-                
-                # Process audio directly
-                response = await process_audio_with_gemini(audio_content)
-                
-                # Send response back to client
-                await manager.send_message(response, websocket)
-                print("✅ Response sent to client")
+                # Check if it's a receive event and contains bytes
+                if data.get("type") == "websocket.receive" and "bytes" in data:
+                    audio_content = data["bytes"]
+                    print(f"🎵 Received binary audio: {len(audio_content)} bytes")
+                    
+                    if len(audio_content) == 0:
+                        await manager.send_message({
+                            "type": "error",
+                            "message": "Empty audio received"
+                        }, websocket)
+                        continue
+                    
+                    # Send processing status
+                    await manager.send_message({
+                        "type": "processing",
+                        "message": "Processing your audio..."
+                    }, websocket)
+                    
+                    # Process the audio
+                    try:
+                        response = await process_audio_with_gemini(audio_content)
+                        await manager.send_message(response, websocket)
+                        print("✅ Response sent to client")
+                        
+                    except Exception as process_error:
+                        print(f"❌ Processing error: {process_error}")
+                        await manager.send_message({
+                            "type": "error", 
+                            "message": "Failed to process audio"
+                        }, websocket)
+                        
+                elif data.get("type") == "websocket.disconnect":
+                    break
                     
             except WebSocketDisconnect:
                 break
             except Exception as e:
-                print(f"Error processing message: {e}")
+                print(f"❌ WebSocket error: {e}")
                 try:
                     await manager.send_message({
                         "type": "error",
-                        "message": f"Error: {str(e)}"
+                        "message": "Connection error"
                     }, websocket)
                 except:
                     pass
                 continue
-    
+                
     except WebSocketDisconnect:
-        print("Client disconnected normally")
+        print("🔄 Client disconnected normally")
     except Exception as e:
-        print(f"WebSocket endpoint error: {e}")
+        print(f"💥 WebSocket endpoint crashed: {e}")
     finally:
         manager.disconnect(websocket)
 
@@ -209,7 +226,7 @@ async def process_voice_input(
         })
         
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ HTTP Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
