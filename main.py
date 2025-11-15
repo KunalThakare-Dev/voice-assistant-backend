@@ -74,9 +74,9 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             temp_audio_path = temp_audio.name
         
         try:
-            # Use Gemini 2.5 Flash (Faster and better)
-            model = genai.GenerativeModel('gemini-2.0-flash-exp')
-            print("🎯 Using: Gemini 2.5 Flash Experimental")
+            # Use ACTUAL Gemini 2.5 Flash like your original code
+            model = genai.GenerativeModel('models/gemini-2.5-flash')
+            print("🎯 Using: Gemini 2.5 Flash")
             
             # Create audio part for Gemini
             audio_part = {
@@ -113,7 +113,6 @@ async def process_audio_with_gemini(audio_content: bytes) -> dict:
             
         except Exception as gemini_error:
             print(f"⚠ Gemini error: {gemini_error}")
-            # Only use fallback for actual Gemini errors
             return {
                 "transcript": "Processing audio",
                 "replyText": "I'm having trouble processing your audio right now. Please try again.",
