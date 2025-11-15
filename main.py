@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import google.generativeai as genai
 import uvicorn
-import json
 
 app = FastAPI(title="Voice Assistant API")
 
@@ -143,43 +142,22 @@ async def websocket_voice_endpoint(websocket: WebSocket):
     try:
         while True:
             try:
-                # Check if message is text or binary
-                message = await websocket.receive()
+                # Receive binary data directly
+                audio_content = await websocket.receive_bytes()
+                print(f"🎵 Received binary audio: {len(audio_content)} bytes")
                 
-                if message["type"] == "websocket.receive":
-                    if "text" in message:
-                        # Handle text messages (like ping)
-                        data = json.loads(message["text"])
-                        message_type = data.get("type")
-                        
-                        if message_type == "ping":
-                            await manager.send_message({
-                                "type": "pong",
-                                "message": "Connection active"
-                            }, websocket)
-                        else:
-                            await manager.send_message({
-                                "type": "error", 
-                                "message": "Unknown text message type"
-                            }, websocket)
-                            
-                    elif "bytes" in message:
-                        # Handle binary audio data
-                        audio_content = message["bytes"]
-                        print(f"🎵 Received binary audio: {len(audio_content)} bytes")
-                        
-                        # Send processing status immediately
-                        await manager.send_message({
-                            "type": "processing",
-                            "message": "Processing your audio..."
-                        }, websocket)
-                        
-                        # Process audio directly
-                        response = await process_audio_with_gemini(audio_content)
-                        
-                        # Send response back to client
-                        await manager.send_message(response, websocket)
-                        print("✅ Response sent to client")
+                # Send processing status immediately
+                await manager.send_message({
+                    "type": "processing",
+                    "message": "Processing your audio..."
+                }, websocket)
+                
+                # Process audio directly
+                response = await process_audio_with_gemini(audio_content)
+                
+                # Send response back to client
+                await manager.send_message(response, websocket)
+                print("✅ Response sent to client")
                     
             except WebSocketDisconnect:
                 break
@@ -188,7 +166,7 @@ async def websocket_voice_endpoint(websocket: WebSocket):
                 try:
                     await manager.send_message({
                         "type": "error",
-                        "message": f"Error processing audio: {str(e)}"
+                        "message": f"Error: {str(e)}"
                     }, websocket)
                 except:
                     pass
