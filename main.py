@@ -1,11 +1,13 @@
 import os
 import base64
 import tempfile
-from fastapi import FastAPI, HTTPException, Header, UploadFile, File
+import asyncio
+from fastapi import FastAPI, HTTPException, Header, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import google.generativeai as genai
 import uvicorn
+import json
 
 app = FastAPI(title="Voice Assistant API")
 
@@ -22,24 +24,44 @@ app.add_middleware(
 APP_TOKEN = os.getenv("APP_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-def authenticate_request(x_app_token: str = Header(None)):
-    if not APP_TOKEN or x_app_token != APP_TOKEN:
-        raise HTTPException(status_code=401, detail="Invalid app token")
+# WebSocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = []
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"✅ WebSocket connected. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        print(f"❌ WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def send_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            self.disconnect(websocket)
 
-@app.post("/voice")
-async def process_voice_input(
-    audio_data: UploadFile = File(...),
-    x_app_token: str = Header(None)
-):
+manager = ConnectionManager()
+
+def authenticate_websocket(websocket: WebSocket):
+    """Authenticate WebSocket connection"""
+    try:
+        token = websocket.query_params.get("token")
+        if not APP_TOKEN or token != APP_TOKEN:
+            return False
+        return True
+    except:
+        return False
+
+async def process_audio_with_gemini(audio_content: bytes) -> dict:
+    """Process audio with Gemini and return response"""
     try:
         print("=== Processing voice with Gemini ===")
-        
-        # Authentication
-        authenticate_request(x_app_token)
-        
-        # Read audio file
-        audio_content = await audio_data.read()
-        print(f"✓ Audio received: {len(audio_content)} bytes")
         
         # Configure Gemini
         genai.configure(api_key=GEMINI_API_KEY)
@@ -92,10 +114,99 @@ async def process_voice_input(
             # Clean up temp file
             os.unlink(temp_audio_path)
         
-        return JSONResponse({
+        return {
             "transcript": transcript,
             "replyText": ai_response,
-            "replyAudioBase64": "not_needed"  # Browser handles TTS
+            "type": "assistant_response"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error in process_audio_with_gemini: {e}")
+        return {
+            "transcript": "Error processing audio",
+            "replyText": "Sorry, I encountered an error processing your request.",
+            "type": "error"
+        }
+
+@app.websocket("/ws/voice")
+async def websocket_voice_endpoint(websocket: WebSocket):
+    # Authenticate connection
+    if not authenticate_websocket(websocket):
+        await websocket.close(code=1008, reason="Invalid authentication")
+        return
+    
+    await manager.connect(websocket)
+    
+    try:
+        while True:
+            # Wait for message from client
+            data = await websocket.receive()
+            
+            if data["type"] == "websocket.receive":
+                message_data = json.loads(data["text"])
+                message_type = message_data.get("type")
+                
+                if message_type == "audio_data":
+                    # Send processing status
+                    await manager.send_message({
+                        "type": "processing",
+                        "message": "Processing your audio..."
+                    }, websocket)
+                    
+                    # Process audio data
+                    audio_base64 = message_data.get("audio_data")
+                    audio_content = base64.b64decode(audio_base64)
+                    
+                    # Get AI response
+                    response = await process_audio_with_gemini(audio_content)
+                    
+                    # Send response back to client
+                    await manager.send_message(response, websocket)
+                    
+                elif message_type == "ping":
+                    # Keep connection alive
+                    await manager.send_message({
+                        "type": "pong",
+                        "message": "Connection active"
+                    }, websocket)
+                    
+                elif message_type == "text_message":
+                    # Handle text messages if needed
+                    await manager.send_message({
+                        "type": "text_response",
+                        "message": "Text messages are not supported in voice mode"
+                    }, websocket)
+    
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        manager.disconnect(websocket)
+
+# Keep existing HTTP endpoints for compatibility
+@app.post("/voice")
+async def process_voice_input(
+    audio_data: UploadFile = File(...),
+    x_app_token: str = Header(None)
+):
+    try:
+        print("=== Processing voice with Gemini (HTTP) ===")
+        
+        # Authentication
+        if not APP_TOKEN or x_app_token != APP_TOKEN:
+            raise HTTPException(status_code=401, detail="Invalid app token")
+        
+        # Read audio file
+        audio_content = await audio_data.read()
+        print(f"✓ Audio received: {len(audio_content)} bytes")
+        
+        # Process audio
+        response = await process_audio_with_gemini(audio_content)
+        
+        return JSONResponse({
+            "transcript": response["transcript"],
+            "replyText": response["replyText"],
+            "replyAudioBase64": "not_needed"
         })
         
     except Exception as e:
@@ -104,7 +215,7 @@ async def process_voice_input(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "message": "Voice Assistant API"}
+    return {"status": "healthy", "message": "Voice Assistant API with WebSocket support"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
