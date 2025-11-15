@@ -1,11 +1,13 @@
 import os
 import base64
 import tempfile
+import requests
 from fastapi import FastAPI, HTTPException, Header, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import google.generativeai as genai
 import uvicorn
+import re
 
 app = FastAPI(title="Voice Assistant API")
 
@@ -25,6 +27,24 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 def authenticate_request(x_app_token: str = Header(None)):
     if not APP_TOKEN or x_app_token != APP_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid app token")
+
+def extract_audio_url(html_text):
+    """Extract audio URL from HTML response"""
+    match = re.search(r'src="([^"]+\.mp3)"', html_text)
+    return match.group(1) if match else None
+
+def download_audio_to_base64(audio_url):
+    """Download audio from URL and convert to base64"""
+    try:
+        response = requests.get(audio_url)
+        response.raise_for_status()
+        
+        audio_base64 = base64.b64encode(response.content).decode('utf-8')
+        print(f"✓ Downloaded audio: {len(audio_base64)} bytes")
+        return audio_base64
+    except Exception as e:
+        print(f"⚠ Audio download error: {e}")
+        return ""
 
 @app.post("/voice")
 async def process_voice_input(
@@ -64,50 +84,46 @@ async def process_voice_input(
                 "data": audio_bytes
             }
             
-            # Prompt that should trigger audio response
-            prompt = """
-            You are a voice assistant. The user has spoken to you.
-            
-            Listen to their audio and respond with BOTH:
-            1. A text transcript of what you heard
-            2. A spoken audio response back to them
-            
-            Keep your response conversational and helpful (1-2 sentences).
-            """
+            # SIMPLE prompt - don't ask for specific format
+            prompt = "Respond to the user's voice message naturally and conversationally."
             
             print("🚀 Sending to Gemini 2.5 Flash TTS...")
             
-            # Generate content - this SHOULD return audio!
+            # Generate content
             response = model.generate_content([prompt, audio_part])
+            response_text = response.text
             
-            # Check if response has audio
-            if hasattr(response, 'audio') and response.audio:
-                print("✅ Got audio response from Gemini!")
-                audio_base64 = base64.b64encode(response.audio).decode('utf-8')
-                transcript = "Audio processed by Gemini TTS"
-                ai_response = response.text if response.text else "I understand your message"
-            else:
-                print("⚠ Gemini returned text only, no audio")
-                audio_base64 = ""
-                transcript = "Voice message received"
-                ai_response = response.text if response.text else "Hello! I heard you."
+            print(f"✓ Raw response: {response_text}")
             
-            print(f"✓ Response: {ai_response}")
-            print(f"✓ Audio data: {'Yes' if audio_base64 else 'No'}")
+            # Extract audio URL from HTML
+            audio_url = extract_audio_url(response_text)
+            audio_base64 = ""
+            
+            if audio_url:
+                print(f"✓ Found audio URL: {audio_url}")
+                # Download and convert audio
+                audio_base64 = download_audio_to_base64(audio_url)
+            
+            # Extract clean text (remove HTML)
+            clean_text = re.sub(r'<[^>]+>', '', response_text).strip()
+            
+            # If we still have the whole instruction text, extract just the response
+            if "Transcript:" in clean_text and "Audio Response:" in clean_text:
+                parts = clean_text.split("Audio Response:")
+                if len(parts) > 1:
+                    clean_text = parts[1].strip()
+            
+            transcript = "Voice message processed"
+            ai_response = clean_text if clean_text else "I understand your message"
+            
+            print(f"✓ Clean response: {ai_response}")
+            print(f"✓ Audio available: {'Yes' if audio_base64 else 'No'}")
             
         except Exception as gemini_error:
             print(f"⚠ Gemini TTS error: {gemini_error}")
-            # Fallback to regular model
-            try:
-                model = genai.GenerativeModel('models/gemini-2.5-flash')
-                response = model.generate_content([prompt, audio_part])
-                transcript = "Voice message processed"
-                ai_response = response.text
-                audio_base64 = ""
-            except:
-                transcript = "I heard your voice"
-                ai_response = "Hello! I received your message."
-                audio_base64 = ""
+            transcript = "I heard your voice"
+            ai_response = "Hello! I received your message."
+            audio_base64 = ""
         
         finally:
             # Clean up temp file
